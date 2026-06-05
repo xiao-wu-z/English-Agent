@@ -1,0 +1,71 @@
+schema: spec-driven
+
+context: |
+  Project: English-Agent, an AI English speaking coach MVP.
+
+  Product goal:
+  - Build a two-day deliverable MVP for multi-scenario English speaking practice.
+  - The core experience is real-time spoken English conversation: the user speaks, the AI replies by voice, and the AI stays in role for the selected scenario.
+  - The product should feel like a practical learning tool, not a generic chatbot.
+
+  MVP scope:
+  - Include multi-scenario selection with at least five built-in scenarios: job interview, restaurant ordering, business meeting, airport/travel, and daily small talk.
+  - Include scenario configuration files, scenario schema validation, real-time voice input, AI voice output, role-play behavior, lightweight in-session corrections, post-session structured summaries, and browser-local practice history.
+  - Store practice history in browser localStorage, capped to recent records.
+  - Do not include login, server database, admin scenario management, native mobile app, professional phoneme-level pronunciation scoring, course systems, rankings, or social features in V1.
+
+  Tech stack:
+  - Next.js App Router
+  - TypeScript
+  - React
+  - Tailwind CSS
+  - Zod
+  - OpenAI Realtime API
+  - WebRTC
+  - Browser localStorage
+
+  Architecture conventions:
+  - Keep scenario data config-driven and validated with Zod.
+  - Keep OpenAI API keys on the server side only.
+  - Isolate realtime session creation behind API routes.
+  - Keep client session state, transcript display, correction display, summary generation, and local history as separate modules where practical.
+  - Prefer small, focused files and clear interfaces over broad utility modules.
+
+  UX conventions:
+  - Chinese is preferred for planning docs and agent discussion unless the artifact explicitly needs English.
+  - The application UI should be utilitarian and learning-focused.
+  - Realtime correction should be restrained and should not frequently interrupt speaking practice.
+  - Detailed feedback belongs in the end-of-session summary.
+  - Error states must clearly cover microphone permission denial, realtime connection failure, missing API key, invalid scenario config, summary generation failure, and local history persistence failure.
+
+  Collaboration conventions:
+  - Use OpenSpec to capture meaningful product or behavior changes before implementation.
+  - Use Superpowers workflows alongside OpenSpec: explore/propose for requirements, plans for implementation, verification before completion.
+  - Keep proposals and tasks scoped to a single implementable change.
+  - Prefer conventional commits when committing project changes.
+
+rules:
+  proposal:
+    - Write proposals in Chinese by default.
+    - Keep the change focused on one product capability or implementation milestone.
+    - Always include clear in-scope and out-of-scope boundaries.
+    - State the user-facing value, not only the technical change.
+    - Mention any dependency on OpenAI Realtime, WebRTC, browser permissions, localStorage, or scenario configuration when relevant.
+  design:
+    - Write designs in Chinese by default.
+    - Cover architecture, module boundaries, data flow, error handling, and verification.
+    - Preserve the V1 decisions from the baseline spec unless the proposal explicitly changes them.
+    - Do not introduce login, database, admin tooling, or native mobile scope unless the proposal explicitly asks for it.
+    - Call out how API keys remain server-side and how browser-facing code avoids secret exposure.
+  specs:
+    - Use OpenSpec requirement language with SHALL statements.
+    - Include concrete scenarios using WHEN/THEN bullets.
+    - Prefer capability specs that map to product behavior users can observe.
+    - Keep delta specs minimal and intentional; do not restate unrelated requirements.
+    - Include failure and recovery scenarios for voice, permission, config, summary, and local history behavior when relevant.
+  tasks:
+    - Write tasks in Chinese by default.
+    - Break work into independently verifiable chunks suitable for Superpowers execution.
+    - Include expected verification commands such as npm run lint, npm run build, and focused tests when available.
+    - Include manual verification steps for realtime voice, scenario selection, correction display, summary generation, and persisted local history when relevant.
+    - Keep tasks implementation-oriented and avoid vague research-only items unless explicitly marked as a spike.
