@@ -5,6 +5,7 @@ import {
   type RealtimeProviderEvent,
   type RealtimeSession,
 } from "../model-providers/realtime-types.ts";
+import type { RealtimeApplicationEvent } from "./application-events.ts";
 import {
   createRealtimePracticeSession,
   endRealtimePracticeSession,
@@ -34,17 +35,7 @@ class RecordingRealtimeProvider implements RealtimeModelProvider {
 
   async sendAudioChunk(sessionId: string, chunk: Uint8Array): Promise<void> {
     this.sentAudio.push(chunk);
-    for (const handler of this.handlers.get(sessionId) ?? []) {
-      handler({
-        id: "provider-event-1",
-        sessionId,
-        type: "transcript.user.final",
-        providerName: this.name,
-        modelName: this.modelName,
-        createdAt: "2026-06-07T00:00:01.000Z",
-        text: "Hello from PCM.",
-      });
-    }
+    this.emitFinalTranscript(sessionId, "Hello from PCM.", "provider-event-1");
   }
 
   async endSession(): Promise<void> {}
@@ -57,6 +48,20 @@ class RecordingRealtimeProvider implements RealtimeModelProvider {
     handlers.add(handler);
     this.handlers.set(sessionId, handlers);
     return () => handlers.delete(handler);
+  }
+
+  emitFinalTranscript(sessionId: string, text: string, id: string): void {
+    for (const handler of this.handlers.get(sessionId) ?? []) {
+      handler({
+        id,
+        sessionId,
+        type: "transcript.user.final",
+        providerName: this.name,
+        modelName: this.modelName,
+        createdAt: "2026-06-07T00:00:01.000Z",
+        text,
+      });
+    }
   }
 }
 
@@ -165,13 +170,91 @@ describe("realtime voice practice flow", () => {
     assert.equal(received.at(-1)?.text, "Hello from PCM.");
   });
 
+  it("creates a linked skill session and exposes scenario metadata", async () => {
+    const provider = new RecordingRealtimeProvider();
+    const session = await createRealtimePracticeSession({
+      scenarioId: "job-interview",
+      provider,
+    });
+
+    assert.match(session.skillSessionId, /^session-/);
+    assert.equal(session.scenario.titleZh, "求职面试");
+    assert.equal(session.scenario.context.aiRole, "Interviewer");
+  });
+
+  it("processes a final transcript once and emits a correction application event", async () => {
+    const provider = new RecordingRealtimeProvider();
+    const session = await createRealtimePracticeSession({
+      scenarioId: "daily-small-talk",
+      provider,
+    });
+    const received: Array<RealtimeProviderEvent | RealtimeApplicationEvent> = [];
+    subscribeRealtimePracticeEvents(session.id, (event) => received.push(event));
+
+    provider.emitFinalTranscript(
+      session.id,
+      "I want talk about weekend.",
+      "final-event-1",
+    );
+    provider.emitFinalTranscript(
+      session.id,
+      "I want talk about weekend.",
+      "final-event-1",
+    );
+    await session.transcriptProcessing;
+
+    const corrections = received.filter(
+      (event) => event.type === "correction.ready",
+    );
+    assert.equal(corrections.length, 1);
+    assert.match(
+      corrections[0]?.type === "correction.ready"
+        ? corrections[0].correction.explanation
+        : "",
+      /更自然/,
+    );
+  });
+
+  it("waits for transcript processing and returns a structured report on end", async () => {
+    const provider = new RecordingRealtimeProvider();
+    const session = await createRealtimePracticeSession({
+      scenarioId: "daily-small-talk",
+      provider,
+    });
+    provider.emitFinalTranscript(
+      session.id,
+      "I want talk about weekend.",
+      "final-event-1",
+    );
+
+    const ended = await endRealtimePracticeSession(session.id);
+
+    assert.equal(ended.session.status, "completed");
+    assert.equal(ended.scenario.id, "daily-small-talk");
+    assert.equal(typeof ended.summary.overallScore, "number");
+    assert.equal(ended.summary.correctedSentences.length, 1);
+  });
+
+  it("returns the stored report when end is requested more than once", async () => {
+    const session = await createRealtimePracticeSession({
+      scenarioId: "daily-small-talk",
+    });
+
+    const first = await endRealtimePracticeSession(session.id);
+    const second = await endRealtimePracticeSession(session.id);
+
+    assert.equal(second.summary.sessionId, first.summary.sessionId);
+    assert.equal(second.summary.overallScore, first.summary.overallScore);
+  });
+
   it("closes the session provider and records the closed event", async () => {
     const session = await createRealtimePracticeSession({
       scenarioId: "daily-small-talk",
     });
 
-    await endRealtimePracticeSession(session.id);
+    const ended = await endRealtimePracticeSession(session.id);
 
     assert.equal(getRealtimePracticeEvents(session.id).at(-1)?.type, "session.closed");
+    assert.equal(ended.session.status, "completed");
   });
 });

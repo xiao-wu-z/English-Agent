@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createRealtimePracticeSession } from "@/lib/realtime-voice-flow/orchestrator.server";
+import { toVoicePracticeScenario } from "@/lib/voice-practice-client";
 
 export async function POST(request: Request) {
   try {
@@ -10,8 +11,9 @@ export async function POST(request: Request) {
     return NextResponse.json({
       session: {
         id: session.id,
-        scenarioId: session.scenarioId,
-        providerSession: session.providerSession,
+        scenario: toVoicePracticeScenario(session.scenario),
+        providerName: session.providerSession.providerName,
+        modelName: session.providerSession.modelName,
       },
     });
   } catch (error) {

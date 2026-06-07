@@ -1,6 +1,16 @@
 import type { RealtimeProviderEvent } from "../model-providers/realtime-types.ts";
 import type { VoicePracticeUiState } from "./state.ts";
 
+function mergeTranscriptPartial(current: string | undefined, incoming: string): string {
+  if (!current || incoming.startsWith(current)) {
+    return incoming;
+  }
+  if (current.endsWith(incoming)) {
+    return current;
+  }
+  return `${current}${incoming}`;
+}
+
 export function applyRealtimeEventToVoiceState(
   state: VoicePracticeUiState,
   event: RealtimeProviderEvent,
@@ -9,7 +19,13 @@ export function applyRealtimeEventToVoiceState(
     case "session.created":
       return { ...state, status: "listening", errorMessage: undefined };
     case "transcript.user.partial":
-      return { ...state, userPartialTranscript: event.text ?? "" };
+      return {
+        ...state,
+        userPartialTranscript: mergeTranscriptPartial(
+          state.userPartialTranscript,
+          event.text ?? "",
+        ),
+      };
     case "transcript.user.final":
       return {
         ...state,
@@ -17,14 +33,20 @@ export function applyRealtimeEventToVoiceState(
         userPartialTranscript: undefined,
         messages: [
           ...state.messages,
-          { role: "user", content: event.text ?? "" },
+          {
+            role: "user",
+            content: event.text ?? state.userPartialTranscript ?? "",
+          },
         ],
       };
     case "transcript.assistant.partial":
       return {
         ...state,
         status: "speaking",
-        assistantPartialTranscript: event.text ?? "",
+        assistantPartialTranscript: mergeTranscriptPartial(
+          state.assistantPartialTranscript,
+          event.text ?? "",
+        ),
       };
     case "transcript.assistant.final":
       return {
@@ -33,7 +55,10 @@ export function applyRealtimeEventToVoiceState(
         assistantPartialTranscript: undefined,
         messages: [
           ...state.messages,
-          { role: "assistant", content: event.text ?? "" },
+          {
+            role: "assistant",
+            content: event.text ?? state.assistantPartialTranscript ?? "",
+          },
         ],
       };
     case "audio.delta":
