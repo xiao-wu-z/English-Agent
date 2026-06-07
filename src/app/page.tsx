@@ -1,7 +1,33 @@
 "use client";
 
 import { FormEvent, useRef, useState } from "react";
+import {
+  buildPcmAudioChunkMetadata,
+  detectPcmCaptureSupport,
+  encodePcm16,
+  mixToMono,
+  PCM_CAPTURE_MIME_TYPE,
+  resampleLinear,
+} from "@/lib/pcm-audio-capture";
+import {
+  DEFAULT_VOICE_TIMEOUT_POLICY,
+  createVoiceRecoveryTimerRegistry,
+  decideVoiceRecovery,
+  getVoiceRecoveryMessage,
+  mapTimeoutToRecoveryReason,
+  type VoiceTimeoutType,
+  type VoiceRecoveryReason,
+  type VoiceRecoveryTimerRegistry,
+} from "@/lib/realtime-voice-recovery";
+import {
+  decodeBase64ToBytes,
+  decodePcm16ToFloat32,
+  QWEN_OUTPUT_SAMPLE_RATE,
+  reducePlaybackQueue,
+  type QwenPlaybackQueueState,
+} from "@/lib/qwen-pcm-playback";
 import { selectSupportedMediaRecorderMimeType } from "@/lib/voice-audio-format/browser";
+import { voiceDiagnosticsSchema } from "@/lib/voice-e2e-validation";
 
 type ScenarioOption = {
   id: string;
@@ -77,12 +103,84 @@ export default function Home() {
   const [voiceEvents, setVoiceEvents] = useState<VoiceEvent[]>([]);
   const [voiceCorrection, setVoiceCorrection] = useState<string | null>(null);
   const [voiceAudioMimeType, setVoiceAudioMimeType] = useState<string | null>(null);
+  const [voiceSseStatus, setVoiceSseStatus] = useState("idle");
+  const [voiceFallbackReason, setVoiceFallbackReason] = useState("none");
+  const [playbackState, setPlaybackState] = useState<QwenPlaybackQueueState>({
+    queue: [],
+    status: "idle",
+  });
   const [isRecording, setIsRecording] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioWorkletNodeRef = useRef<AudioWorkletNode | null>(null);
+  const playbackContextRef = useRef<AudioContext | null>(null);
   const audioSequenceRef = useRef(0);
+  const sseRecoveryAttemptsRef = useRef(0);
+  const timerRegistryRef = useRef<VoiceRecoveryTimerRegistry>(
+    createVoiceRecoveryTimerRegistry({
+      setTimeout: (callback, delayMs) => window.setTimeout(callback, delayMs),
+      clearTimeout: (id) => window.clearTimeout(id as number),
+    }),
+  );
   const activeScenario = scenarios.find((item) => item.id === scenarioId) ?? scenarios[0];
+
+  function applyVoiceRecovery(reason: VoiceRecoveryReason, attempts = 0) {
+    const decision = decideVoiceRecovery({ reason, attempts });
+    setVoiceFallbackReason(reason);
+    setVoiceStatus(decision.health === "fallback_text" ? "failed" : "thinking");
+    setError(getVoiceRecoveryMessage(reason));
+    if (decision.action === "fallback_to_text" || decision.action === "show_safe_error") {
+      stopRecording();
+    }
+  }
+
+  function startVoiceTimer(timeoutType: VoiceTimeoutType) {
+    timerRegistryRef.current.start(
+      timeoutType,
+      DEFAULT_VOICE_TIMEOUT_POLICY[timeoutType],
+      () => applyVoiceRecovery(mapTimeoutToRecoveryReason(timeoutType)),
+    );
+  }
+
+  function clearVoiceTimer(timeoutType: VoiceTimeoutType) {
+    timerRegistryRef.current.clear(timeoutType);
+  }
+
+  function refreshSseIdleTimer() {
+    clearVoiceTimer("sse_idle_timeout");
+    startVoiceTimer("sse_idle_timeout");
+  }
+
+  async function playQwenAudioDelta(audio: { encoding: string; data: string }) {
+    if (audio.encoding !== "pcm/base64") {
+      return;
+    }
+    try {
+      const bytes = decodeBase64ToBytes(audio.data);
+      const samples = decodePcm16ToFloat32(bytes);
+      const context = playbackContextRef.current ?? new AudioContext();
+      playbackContextRef.current = context;
+      const buffer = context.createBuffer(1, samples.length, QWEN_OUTPUT_SAMPLE_RATE);
+      const playbackSamples = new Float32Array(samples.length);
+      playbackSamples.set(samples);
+      buffer.copyToChannel(playbackSamples, 0);
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.connect(context.destination);
+      source.start();
+      setPlaybackState((state) => reducePlaybackQueue(state, { type: "consume" }));
+    } catch {
+      setPlaybackState((state) =>
+        reducePlaybackQueue(state, {
+          type: "fail",
+          message: "语音播放失败，已切换为文本显示。",
+        }),
+      );
+      setError("语音播放失败，已切换为文本显示。");
+    }
+  }
 
   async function startSession() {
     setError(null);
@@ -156,28 +254,19 @@ export default function Home() {
     setError(null);
     setVoiceCorrection(null);
     setVoiceEvents([]);
+    setVoiceSseStatus("idle");
+    setVoiceFallbackReason("none");
     setVoiceStatus("requesting_microphone");
-    if (typeof window !== "undefined" && !("MediaRecorder" in window)) {
-      setVoiceStatus("failed");
-      setError("当前浏览器不支持录音能力，请先使用文本练习。");
-      return;
-    }
-    const mimeSelection = selectSupportedMediaRecorderMimeType((mimeType) =>
-      MediaRecorder.isTypeSupported(mimeType),
-    );
-    if (!mimeSelection.supported) {
-      setVoiceStatus("failed");
-      setError(mimeSelection.message);
-      return;
-    }
-    setVoiceAudioMimeType(mimeSelection.mimeType);
+    setVoiceAudioMimeType(PCM_CAPTURE_MIME_TYPE);
     setVoiceStatus("connecting");
+    startVoiceTimer("qwen_connect_timeout");
     const response = await fetch("/api/realtime-practice-sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ scenarioId }),
     });
     const data = await response.json();
+    clearVoiceTimer("qwen_connect_timeout");
     if (!response.ok) {
       setVoiceStatus("failed");
       setError(data.error?.message ?? "创建语音练习失败");
@@ -185,20 +274,37 @@ export default function Home() {
     }
     setVoiceSessionId(data.session.id);
     eventSourceRef.current?.close();
+    setVoiceSseStatus("connecting");
     const eventSource = new EventSource(
       `/api/realtime-practice-sessions/${data.session.id}/events`,
     );
     eventSource.addEventListener("realtime.event", (event) => {
       const parsed = JSON.parse((event as MessageEvent).data) as VoiceEvent;
+      setVoiceSseStatus("connected");
+      sseRecoveryAttemptsRef.current = 0;
+      refreshSseIdleTimer();
       setVoiceEvents((items) => [...items, parsed]);
+      const audio = parsed.audio;
+      if (audio) {
+        setPlaybackState((state) =>
+          reducePlaybackQueue(state, { type: "enqueue", item: audio }),
+        );
+        void playQwenAudioDelta(audio);
+      }
       if (parsed.type === "transcript.assistant.final") {
+        clearVoiceTimer("no_assistant_response_timeout");
         setVoiceStatus("speaking");
       } else if (parsed.type === "transcript.user.final") {
+        clearVoiceTimer("no_user_speech_timeout");
+        startVoiceTimer("no_assistant_response_timeout");
         setVoiceStatus("thinking");
       }
     });
     eventSource.onerror = () => {
-      setError("语音事件连接不稳定，可以继续使用文本练习。");
+      setVoiceSseStatus("disconnected");
+      setVoiceFallbackReason("sse_disconnected");
+      applyVoiceRecovery("sse_disconnected", sseRecoveryAttemptsRef.current);
+      sseRecoveryAttemptsRef.current += 1;
     };
     eventSourceRef.current = eventSource;
     setVoiceStatus("listening");
@@ -231,28 +337,122 @@ export default function Home() {
   }
 
   async function startRecording() {
-    if (!voiceSessionId || !voiceAudioMimeType) {
+    if (!voiceSessionId) {
       return;
     }
     setError(null);
+    startVoiceTimer("microphone_permission_timeout");
+    const pcmSupport = detectPcmCaptureSupport();
+    if (pcmSupport.supported) {
+      await startPcmRecording(voiceSessionId);
+      return;
+    }
+    if (!("MediaRecorder" in window)) {
+      setVoiceStatus("failed");
+      setError(pcmSupport.message);
+      return;
+    }
+    const mimeSelection = selectSupportedMediaRecorderMimeType((mimeType) =>
+      MediaRecorder.isTypeSupported(mimeType),
+    );
+    if (!mimeSelection.supported) {
+      setVoiceStatus("failed");
+      setError(mimeSelection.message);
+      return;
+    }
+    setVoiceAudioMimeType(mimeSelection.mimeType);
+    await startMediaRecorderFallback(voiceSessionId, mimeSelection.mimeType);
+  }
+
+  async function startPcmRecording(activeVoiceSessionId: string) {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    clearVoiceTimer("microphone_permission_timeout");
     mediaStreamRef.current = stream;
     audioSequenceRef.current = 0;
-    const recorder = new MediaRecorder(stream, { mimeType: voiceAudioMimeType });
-    recorder.ondataavailable = async (event) => {
-      if (!event.data || event.data.size === 0 || !voiceSessionId) {
+    const audioContext = new AudioContext();
+    audioContextRef.current = audioContext;
+    await audioContext.audioWorklet.addModule("/pcm-capture-worklet.js");
+    const source = audioContext.createMediaStreamSource(stream);
+    const workletNode = new AudioWorkletNode(audioContext, "pcm-capture-processor");
+    audioWorkletNodeRef.current = workletNode;
+    workletNode.port.onmessage = async (event: MessageEvent<{
+      type: string;
+      sampleRate: number;
+      channels: Float32Array[];
+    }>) => {
+      if (event.data.type !== "audio-frame") {
+        return;
+      }
+      const mono = mixToMono(event.data.channels);
+      const resampled = resampleLinear(mono, event.data.sampleRate);
+      const pcmBytes = encodePcm16(resampled);
+      if (pcmBytes.byteLength === 0) {
         return;
       }
       const sequence = audioSequenceRef.current;
       audioSequenceRef.current += 1;
+      const metadata = buildPcmAudioChunkMetadata({
+        sequence,
+        byteLength: pcmBytes.byteLength,
+      });
+      const pcmBody = pcmBytes.buffer.slice(
+        pcmBytes.byteOffset,
+        pcmBytes.byteOffset + pcmBytes.byteLength,
+      ) as ArrayBuffer;
+      startVoiceTimer("audio_send_timeout");
       const response = await fetch(
-        `/api/realtime-practice-sessions/${voiceSessionId}/audio`,
+        `/api/realtime-practice-sessions/${activeVoiceSessionId}/audio`,
         {
           method: "POST",
           headers: {
-            "Content-Type": event.data.type || voiceAudioMimeType,
+            "Content-Type": PCM_CAPTURE_MIME_TYPE,
+            "X-Audio-Chunk-Metadata": JSON.stringify(metadata),
+          },
+          body: new Blob([pcmBody], { type: PCM_CAPTURE_MIME_TYPE }),
+        },
+      );
+      if (!response.ok) {
+        clearVoiceTimer("audio_send_timeout");
+        const data = await response.json();
+        setIsRecording(false);
+        setVoiceStatus("failed");
+        setVoiceFallbackReason("audio_send_failed");
+        setError(data.error?.message ?? "语音发送失败，可以先使用文本练习。");
+      }
+      clearVoiceTimer("audio_send_timeout");
+      startVoiceTimer("no_user_speech_timeout");
+    };
+    source.connect(workletNode);
+    workletNode.connect(audioContext.destination);
+    setVoiceAudioMimeType(PCM_CAPTURE_MIME_TYPE);
+    setIsRecording(true);
+    setVoiceStatus("listening");
+  }
+
+  async function startMediaRecorderFallback(
+    activeVoiceSessionId: string,
+    mimeType: string,
+  ) {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    clearVoiceTimer("microphone_permission_timeout");
+    mediaStreamRef.current = stream;
+    audioSequenceRef.current = 0;
+    const recorder = new MediaRecorder(stream, { mimeType });
+    recorder.ondataavailable = async (event) => {
+      if (!event.data || event.data.size === 0) {
+        return;
+      }
+      const sequence = audioSequenceRef.current;
+      audioSequenceRef.current += 1;
+      startVoiceTimer("audio_send_timeout");
+      const response = await fetch(
+        `/api/realtime-practice-sessions/${activeVoiceSessionId}/audio`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": event.data.type || mimeType,
             "X-Audio-Chunk-Metadata": JSON.stringify({
-              mimeType: event.data.type || voiceAudioMimeType,
+              mimeType: event.data.type || mimeType,
               sequence,
               byteLength: event.data.size,
             }),
@@ -261,15 +461,23 @@ export default function Home() {
         },
       );
       if (!response.ok) {
+        clearVoiceTimer("audio_send_timeout");
         const data = await response.json();
         setIsRecording(false);
         setVoiceStatus("failed");
+        setVoiceFallbackReason(
+          data.error?.message?.includes("unsupported_audio_format")
+            ? "unsupported_audio_format"
+            : "audio_send_failed",
+        );
         setError(
           data.error?.message?.includes("unsupported_audio_format")
             ? "当前浏览器录音格式暂不能直连实时模型，请先使用文本练习。"
             : data.error?.message ?? "语音发送失败",
         );
       }
+      clearVoiceTimer("audio_send_timeout");
+      startVoiceTimer("no_user_speech_timeout");
     };
     recorder.start(1000);
     mediaRecorderRef.current = recorder;
@@ -279,8 +487,15 @@ export default function Home() {
 
   function stopRecording() {
     mediaRecorderRef.current?.stop();
+    audioWorkletNodeRef.current?.disconnect();
+    void audioContextRef.current?.close();
+    void playbackContextRef.current?.close();
+    timerRegistryRef.current.clearAll();
     mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
     mediaRecorderRef.current = null;
+    audioWorkletNodeRef.current = null;
+    audioContextRef.current = null;
+    playbackContextRef.current = null;
     mediaStreamRef.current = null;
     setIsRecording(false);
   }
@@ -295,8 +510,21 @@ export default function Home() {
       });
     }
     setVoiceStatus("abandoned");
+    setPlaybackState({ queue: [], status: "idle" });
     setVoiceSessionId(null);
   }
+
+  const voiceDiagnostics = voiceSessionId
+    ? voiceDiagnosticsSchema.parse({
+        sessionId: voiceSessionId,
+        providerName: "realtime",
+        modelName: "qwen3.5-omni-plus-realtime",
+        audioFormat: voiceAudioMimeType ?? "unknown",
+        sseStatus: voiceSseStatus,
+        lastEventType: voiceEvents.at(-1)?.type ?? "none",
+        fallbackReason: voiceFallbackReason,
+      })
+    : null;
 
   return (
     <main className="min-h-screen bg-neutral-50 text-neutral-950">
@@ -459,7 +687,7 @@ export default function Home() {
                 <div className="rounded-md border border-neutral-200 bg-white p-4 text-sm">
                   <div className="font-medium">麦克风</div>
                   <p className="mt-2 text-neutral-600">
-                    MVP 使用 MediaRecorder 边界，不保存原始音频。
+                    优先使用 PCM16 16k 采集，不保存原始音频。
                   </p>
                   {voiceAudioMimeType ? (
                     <p className="mt-2 font-mono text-xs text-neutral-500">
@@ -472,7 +700,19 @@ export default function Home() {
                   <p className="mt-2 text-neutral-600">
                     {voiceEvents.filter((event) => event.type === "audio.delta").length} 个 audio delta
                   </p>
+                  <p className="mt-1 text-neutral-600">状态：{playbackState.status}</p>
+                  {playbackState.errorMessage ? (
+                    <p className="mt-1 text-red-700">{playbackState.errorMessage}</p>
+                  ) : null}
                 </div>
+                {voiceDiagnostics ? (
+                  <div className="rounded-md border border-neutral-200 bg-white p-4 text-sm">
+                    <div className="font-medium">诊断</div>
+                    <p className="mt-2 text-neutral-600">SSE：{voiceDiagnostics.sseStatus}</p>
+                    <p className="mt-1 text-neutral-600">事件：{voiceDiagnostics.lastEventType}</p>
+                    <p className="mt-1 text-neutral-600">回退：{voiceDiagnostics.fallbackReason}</p>
+                  </div>
+                ) : null}
                 {voiceCorrection ? (
                   <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
                     轻纠错：{voiceCorrection}
