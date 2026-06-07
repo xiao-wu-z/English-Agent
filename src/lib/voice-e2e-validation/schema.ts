@@ -5,7 +5,14 @@ export const voiceDiagnosticsSchema = z.object({
   providerName: z.string().min(1),
   modelName: z.string().min(1),
   audioFormat: z.string().min(1),
-  sseStatus: z.enum(["idle", "connecting", "connected", "disconnected", "failed"]),
+  sseStatus: z.enum([
+    "idle",
+    "connecting",
+    "connected",
+    "disconnected",
+    "closed",
+    "failed",
+  ]),
   lastEventType: z.string().min(1),
   fallbackReason: z.string().min(1),
 }).strict();
