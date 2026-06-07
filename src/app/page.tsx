@@ -24,6 +24,7 @@ import {
   decodePcm16ToFloat32,
   QWEN_OUTPUT_SAMPLE_RATE,
   reducePlaybackQueue,
+  schedulePcmPlayback,
   type QwenPlaybackQueueState,
 } from "@/lib/qwen-pcm-playback";
 import type { RealtimeProviderEvent } from "@/lib/model-providers/realtime-types";
@@ -114,6 +115,7 @@ export default function Home() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioWorkletNodeRef = useRef<AudioWorkletNode | null>(null);
   const playbackContextRef = useRef<AudioContext | null>(null);
+  const playbackNextStartTimeRef = useRef(0);
   const audioSequenceRef = useRef(0);
   const sseRecoveryAttemptsRef = useRef(0);
   const timerRegistryRef = useRef<VoiceRecoveryTimerRegistry>(
@@ -160,6 +162,9 @@ export default function Home() {
       const samples = decodePcm16ToFloat32(bytes);
       const context = playbackContextRef.current ?? new AudioContext();
       playbackContextRef.current = context;
+      if (context.state === "suspended") {
+        await context.resume();
+      }
       const buffer = context.createBuffer(1, samples.length, QWEN_OUTPUT_SAMPLE_RATE);
       const playbackSamples = new Float32Array(samples.length);
       playbackSamples.set(samples);
@@ -167,7 +172,14 @@ export default function Home() {
       const source = context.createBufferSource();
       source.buffer = buffer;
       source.connect(context.destination);
-      source.start();
+      const schedule = schedulePcmPlayback({
+        currentTime: context.currentTime,
+        nextStartTime: playbackNextStartTimeRef.current,
+        sampleCount: samples.length,
+        sampleRate: QWEN_OUTPUT_SAMPLE_RATE,
+      });
+      playbackNextStartTimeRef.current = schedule.endTime;
+      source.start(schedule.startTime);
       setPlaybackState((state) => reducePlaybackQueue(state, { type: "consume" }));
     } catch {
       setPlaybackState((state) =>
@@ -249,9 +261,12 @@ export default function Home() {
   }
 
   async function startVoiceSession() {
+    stopPlayback();
     setError(null);
     setVoiceCorrection(null);
     setVoiceEvents([]);
+    playbackNextStartTimeRef.current = 0;
+    setPlaybackState({ queue: [], status: "idle" });
     setVoiceSseStatus("idle");
     setVoiceFallbackReason("none");
     setVoiceStatus("requesting_microphone");
@@ -348,6 +363,11 @@ export default function Home() {
       return;
     }
     setError(null);
+    const playbackContext = playbackContextRef.current ?? new AudioContext();
+    playbackContextRef.current = playbackContext;
+    if (playbackContext.state === "suspended") {
+      await playbackContext.resume();
+    }
     startVoiceTimer("microphone_permission_timeout");
     const pcmSupport = detectPcmCaptureSupport();
     if (pcmSupport.supported) {
@@ -496,19 +516,25 @@ export default function Home() {
     mediaRecorderRef.current?.stop();
     audioWorkletNodeRef.current?.disconnect();
     void audioContextRef.current?.close();
-    void playbackContextRef.current?.close();
     timerRegistryRef.current.clearAll();
     mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
     mediaRecorderRef.current = null;
     audioWorkletNodeRef.current = null;
     audioContextRef.current = null;
-    playbackContextRef.current = null;
     mediaStreamRef.current = null;
     setIsRecording(false);
   }
 
+  function stopPlayback() {
+    void playbackContextRef.current?.close();
+    playbackContextRef.current = null;
+    playbackNextStartTimeRef.current = 0;
+    setPlaybackState({ queue: [], status: "idle" });
+  }
+
   async function cancelVoiceSession() {
     stopRecording();
+    stopPlayback();
     eventSourceRef.current?.close();
     eventSourceRef.current = null;
     if (voiceSessionId) {
@@ -517,7 +543,6 @@ export default function Home() {
       });
     }
     setVoiceStatus("abandoned");
-    setPlaybackState({ queue: [], status: "idle" });
     setVoiceSessionId(null);
   }
 

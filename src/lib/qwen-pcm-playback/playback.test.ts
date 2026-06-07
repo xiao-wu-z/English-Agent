@@ -5,6 +5,7 @@ import {
   decodeBase64ToBytes,
   decodePcm16ToFloat32,
   reducePlaybackQueue,
+  schedulePcmPlayback,
 } from "./index.ts";
 
 describe("qwen pcm playback", () => {
@@ -39,5 +40,37 @@ describe("qwen pcm playback", () => {
 
     assert.deepEqual(state.queue.map((item) => item.data), ["BAUG"]);
     assert.equal(state.status, "playing");
+  });
+
+  it("schedules consecutive PCM chunks without overlapping", () => {
+    const first = schedulePcmPlayback({
+      currentTime: 10,
+      nextStartTime: 0,
+      sampleCount: 2400,
+      sampleRate: QWEN_OUTPUT_SAMPLE_RATE,
+    });
+    const second = schedulePcmPlayback({
+      currentTime: 10.02,
+      nextStartTime: first.endTime,
+      sampleCount: 4800,
+      sampleRate: QWEN_OUTPUT_SAMPLE_RATE,
+    });
+
+    assert.equal(first.startTime, 10);
+    assert.equal(first.endTime, 10.1);
+    assert.equal(second.startTime, 10.1);
+    assert.ok(Math.abs(second.endTime - 10.3) < Number.EPSILON * 10.3);
+  });
+
+  it("resets playback scheduling to current time after the queue drains", () => {
+    const schedule = schedulePcmPlayback({
+      currentTime: 20,
+      nextStartTime: 12,
+      sampleCount: 2400,
+      sampleRate: QWEN_OUTPUT_SAMPLE_RATE,
+    });
+
+    assert.equal(schedule.startTime, 20);
+    assert.equal(schedule.endTime, 20.1);
   });
 });
