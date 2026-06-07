@@ -77,4 +77,16 @@ describe("realtime model providers", () => {
       /unsupported_provider/,
     );
   });
+
+  it("resolves real qwen realtime websocket provider when explicitly configured", () => {
+    const provider = resolveRealtimeProvider({
+      MODEL_PROVIDER: "qwen",
+      DASHSCOPE_API_KEY: "sk-test-secret",
+    });
+
+    assert.equal(provider.name, "qwen");
+    assert.equal(provider.modelName, "qwen3.5-omni-plus-realtime");
+    assert.equal(provider.constructor.name, "QwenRealtimeWebSocketProvider");
+    assert.doesNotMatch(JSON.stringify(provider), /sk-test-secret|Authorization/);
+  });
 });

@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
+import { selectSupportedMediaRecorderMimeType } from "@/lib/voice-audio-format/browser";
 
 type ScenarioOption = {
   id: string;
@@ -75,6 +76,12 @@ export default function Home() {
   const [voiceStatus, setVoiceStatus] = useState("idle");
   const [voiceEvents, setVoiceEvents] = useState<VoiceEvent[]>([]);
   const [voiceCorrection, setVoiceCorrection] = useState<string | null>(null);
+  const [voiceAudioMimeType, setVoiceAudioMimeType] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioSequenceRef = useRef(0);
   const activeScenario = scenarios.find((item) => item.id === scenarioId) ?? scenarios[0];
 
   async function startSession() {
@@ -155,6 +162,15 @@ export default function Home() {
       setError("当前浏览器不支持录音能力，请先使用文本练习。");
       return;
     }
+    const mimeSelection = selectSupportedMediaRecorderMimeType((mimeType) =>
+      MediaRecorder.isTypeSupported(mimeType),
+    );
+    if (!mimeSelection.supported) {
+      setVoiceStatus("failed");
+      setError(mimeSelection.message);
+      return;
+    }
+    setVoiceAudioMimeType(mimeSelection.mimeType);
     setVoiceStatus("connecting");
     const response = await fetch("/api/realtime-practice-sessions", {
       method: "POST",
@@ -168,6 +184,23 @@ export default function Home() {
       return;
     }
     setVoiceSessionId(data.session.id);
+    eventSourceRef.current?.close();
+    const eventSource = new EventSource(
+      `/api/realtime-practice-sessions/${data.session.id}/events`,
+    );
+    eventSource.addEventListener("realtime.event", (event) => {
+      const parsed = JSON.parse((event as MessageEvent).data) as VoiceEvent;
+      setVoiceEvents((items) => [...items, parsed]);
+      if (parsed.type === "transcript.assistant.final") {
+        setVoiceStatus("speaking");
+      } else if (parsed.type === "transcript.user.final") {
+        setVoiceStatus("thinking");
+      }
+    });
+    eventSource.onerror = () => {
+      setError("语音事件连接不稳定，可以继续使用文本练习。");
+    };
+    eventSourceRef.current = eventSource;
     setVoiceStatus("listening");
   }
 
@@ -197,7 +230,70 @@ export default function Home() {
     setVoiceCorrection("这里用 I'd like to talk about... 会更自然，适合口语表达。");
   }
 
-  function cancelVoiceSession() {
+  async function startRecording() {
+    if (!voiceSessionId || !voiceAudioMimeType) {
+      return;
+    }
+    setError(null);
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaStreamRef.current = stream;
+    audioSequenceRef.current = 0;
+    const recorder = new MediaRecorder(stream, { mimeType: voiceAudioMimeType });
+    recorder.ondataavailable = async (event) => {
+      if (!event.data || event.data.size === 0 || !voiceSessionId) {
+        return;
+      }
+      const sequence = audioSequenceRef.current;
+      audioSequenceRef.current += 1;
+      const response = await fetch(
+        `/api/realtime-practice-sessions/${voiceSessionId}/audio`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": event.data.type || voiceAudioMimeType,
+            "X-Audio-Chunk-Metadata": JSON.stringify({
+              mimeType: event.data.type || voiceAudioMimeType,
+              sequence,
+              byteLength: event.data.size,
+            }),
+          },
+          body: event.data,
+        },
+      );
+      if (!response.ok) {
+        const data = await response.json();
+        setIsRecording(false);
+        setVoiceStatus("failed");
+        setError(
+          data.error?.message?.includes("unsupported_audio_format")
+            ? "当前浏览器录音格式暂不能直连实时模型，请先使用文本练习。"
+            : data.error?.message ?? "语音发送失败",
+        );
+      }
+    };
+    recorder.start(1000);
+    mediaRecorderRef.current = recorder;
+    setIsRecording(true);
+    setVoiceStatus("listening");
+  }
+
+  function stopRecording() {
+    mediaRecorderRef.current?.stop();
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    mediaRecorderRef.current = null;
+    mediaStreamRef.current = null;
+    setIsRecording(false);
+  }
+
+  async function cancelVoiceSession() {
+    stopRecording();
+    eventSourceRef.current?.close();
+    eventSourceRef.current = null;
+    if (voiceSessionId) {
+      await fetch(`/api/realtime-practice-sessions/${voiceSessionId}/end`, {
+        method: "POST",
+      });
+    }
     setVoiceStatus("abandoned");
     setVoiceSessionId(null);
   }
@@ -355,7 +451,7 @@ export default function Home() {
                   ))}
                 {voiceEvents.length === 0 ? (
                   <div className="rounded-md border border-dashed border-neutral-300 bg-white p-5 text-sm text-neutral-600">
-                    语音模式默认使用 mock realtime provider。点击下方按钮模拟一次语音输入事件。
+                    开始录音后会把浏览器音频片段发送到实时会话；不保存原始音频。
                   </div>
                 ) : null}
               </div>
@@ -365,6 +461,11 @@ export default function Home() {
                   <p className="mt-2 text-neutral-600">
                     MVP 使用 MediaRecorder 边界，不保存原始音频。
                   </p>
+                  {voiceAudioMimeType ? (
+                    <p className="mt-2 font-mono text-xs text-neutral-500">
+                      {voiceAudioMimeType}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="rounded-md border border-neutral-200 bg-white p-4 text-sm">
                   <div className="font-medium">播放队列</div>
@@ -387,11 +488,27 @@ export default function Home() {
             <div className="flex gap-3 border-t border-neutral-200 pt-4">
               <button
                 className="rounded-md bg-neutral-950 px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
+                disabled={!voiceSessionId || voiceStatus === "abandoned" || isRecording}
+                onClick={startRecording}
+                type="button"
+              >
+                开始录音
+              </button>
+              <button
+                className="rounded-md border border-neutral-300 px-4 py-2 text-sm disabled:opacity-40"
+                disabled={!isRecording}
+                onClick={stopRecording}
+                type="button"
+              >
+                停止录音
+              </button>
+              <button
+                className="rounded-md border border-neutral-300 px-4 py-2 text-sm disabled:opacity-40"
                 disabled={!voiceSessionId || voiceStatus === "abandoned"}
                 onClick={sendMockVoiceTurn}
                 type="button"
               >
-                模拟一句语音
+                模拟文本事件
               </button>
               <button
                 className="rounded-md border border-neutral-300 px-4 py-2 text-sm"
