@@ -61,6 +61,21 @@ describe("voice audio format adapter", () => {
     });
   });
 
+  it("allows direct forwarding for 16 kHz PCM chunks", () => {
+    const result = decideAudioForwarding(
+      {
+        mimeType: "audio/pcm;rate=16000",
+        sequence: 1,
+        byteLength: 640,
+        sampleRate: 16000,
+        channels: 1,
+      },
+      ["audio/pcm;rate=16000"],
+    );
+
+    assert.equal(result.action, "forward_direct");
+  });
+
   it("rejects unsupported MIME type without exposing raw audio or secrets", () => {
     const result = decideAudioForwarding(
       {
