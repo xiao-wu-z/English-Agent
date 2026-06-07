@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { createRealtimeSseResponse, formatRealtimeSseEvent } from "./sse.ts";
+import {
+  createRealtimeSseResponse,
+  formatRealtimeSseEvent,
+  formatRealtimeSseHeartbeat,
+} from "./sse.ts";
 
 describe("realtime voice SSE formatting", () => {
   it("formats normalized provider events as SSE messages", () => {
@@ -25,5 +29,12 @@ describe("realtime voice SSE formatting", () => {
 
     assert.match(response.headers.get("content-type") ?? "", /text\/event-stream/);
     await response.body?.cancel();
+  });
+
+  it("formats heartbeat events that browser clients can observe", () => {
+    assert.equal(
+      formatRealtimeSseHeartbeat(),
+      "event: realtime.heartbeat\ndata: {}\n\n",
+    );
   });
 });

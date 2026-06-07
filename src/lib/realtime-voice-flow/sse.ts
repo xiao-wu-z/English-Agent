@@ -4,6 +4,10 @@ export function formatRealtimeSseEvent(event: RealtimeProviderEvent): string {
   return `event: realtime.event\ndata: ${JSON.stringify(event)}\n\n`;
 }
 
+export function formatRealtimeSseHeartbeat(): string {
+  return "event: realtime.heartbeat\ndata: {}\n\n";
+}
+
 export function createRealtimeSseResponse(
   stream: ReadableStream<Uint8Array>,
 ): Response {

@@ -26,6 +26,11 @@ import {
   reducePlaybackQueue,
   type QwenPlaybackQueueState,
 } from "@/lib/qwen-pcm-playback";
+import type { RealtimeProviderEvent } from "@/lib/model-providers/realtime-types";
+import {
+  applyRealtimeEventToVoiceState,
+  type VoicePracticeUiState,
+} from "@/lib/realtime-voice-ui";
 import { selectSupportedMediaRecorderMimeType } from "@/lib/voice-audio-format/browser";
 import { voiceDiagnosticsSchema } from "@/lib/voice-e2e-validation";
 
@@ -51,14 +56,7 @@ type Summary = {
 
 type PracticeMode = "text" | "voice";
 
-type VoiceEvent = {
-  type: string;
-  text?: string;
-  audio?: {
-    encoding: string;
-    data: string;
-  };
-};
+type VoiceEvent = RealtimeProviderEvent;
 
 const scenarios: ScenarioOption[] = [
   {
@@ -298,7 +296,16 @@ export default function Home() {
         clearVoiceTimer("no_user_speech_timeout");
         startVoiceTimer("no_assistant_response_timeout");
         setVoiceStatus("thinking");
+      } else if (parsed.type === "session.closed") {
+        clearVoiceTimer("sse_idle_timeout");
+        eventSource.close();
+        setVoiceSseStatus("closed");
+        setVoiceStatus("completed");
       }
+    });
+    eventSource.addEventListener("realtime.heartbeat", () => {
+      setVoiceSseStatus("connected");
+      refreshSseIdleTimer();
     });
     eventSource.onerror = () => {
       setVoiceSseStatus("disconnected");
@@ -525,6 +532,10 @@ export default function Home() {
         fallbackReason: voiceFallbackReason,
       })
     : null;
+  const voiceTranscriptState = voiceEvents.reduce<VoicePracticeUiState>(
+    applyRealtimeEventToVoiceState,
+    { status: "connecting", messages: [], playbackQueue: [] },
+  );
 
   return (
     <main className="min-h-screen bg-neutral-50 text-neutral-950">
@@ -663,20 +674,28 @@ export default function Home() {
             </div>
             <div className="grid flex-1 gap-4 py-4 lg:grid-cols-[1fr_280px]">
               <div className="space-y-3">
-                {voiceEvents
-                  .filter((event) => event.text)
-                  .map((event, index) => (
+                {voiceTranscriptState.messages.map((message, index) => (
                     <div
-                      key={`${event.type}-${index}`}
+                      key={`${message.role}-${index}`}
                       className={`max-w-[76%] rounded-md border px-3 py-2 text-sm leading-6 ${
-                        event.type.includes("user")
+                        message.role === "user"
                           ? "ml-auto border-neutral-950 bg-neutral-950 text-white"
                           : "border-neutral-200 bg-white"
                       }`}
                     >
-                      {event.text}
+                      {message.content}
                     </div>
                   ))}
+                {voiceTranscriptState.userPartialTranscript ? (
+                  <div className="ml-auto max-w-[76%] rounded-md border border-neutral-950 bg-neutral-950 px-3 py-2 text-sm leading-6 text-white opacity-70">
+                    {voiceTranscriptState.userPartialTranscript}
+                  </div>
+                ) : null}
+                {voiceTranscriptState.assistantPartialTranscript ? (
+                  <div className="max-w-[76%] rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm leading-6 opacity-70">
+                    {voiceTranscriptState.assistantPartialTranscript}
+                  </div>
+                ) : null}
                 {voiceEvents.length === 0 ? (
                   <div className="rounded-md border border-dashed border-neutral-300 bg-white p-5 text-sm text-neutral-600">
                     开始录音后会把浏览器音频片段发送到实时会话；不保存原始音频。

@@ -57,6 +57,67 @@ describe("realtime voice UI logic", () => {
     assert.equal(state.playbackQueue.length, 1);
   });
 
+  it("coalesces transcript deltas into one pending message before finalizing it", () => {
+    let state = applyRealtimeEventToVoiceState(
+      { status: "listening", messages: [], playbackQueue: [] },
+      {
+        ...baseEvent,
+        type: "transcript.user.partial",
+        text: "Hel",
+      },
+    );
+    state = applyRealtimeEventToVoiceState(state, {
+      ...baseEvent,
+      id: "event-2",
+      type: "transcript.user.partial",
+      text: "lo",
+    });
+    assert.equal(state.userPartialTranscript, "Hello");
+    assert.equal(state.messages.length, 0);
+
+    state = applyRealtimeEventToVoiceState(state, {
+      ...baseEvent,
+      id: "event-3",
+      type: "transcript.user.final",
+      text: "Hello!",
+    });
+    assert.equal(state.userPartialTranscript, undefined);
+    assert.deepEqual(state.messages, [{ role: "user", content: "Hello!" }]);
+
+    state = applyRealtimeEventToVoiceState(state, {
+      ...baseEvent,
+      id: "event-4",
+      type: "transcript.assistant.partial",
+      text: "How",
+    });
+    state = applyRealtimeEventToVoiceState(state, {
+      ...baseEvent,
+      id: "event-5",
+      type: "transcript.assistant.partial",
+      text: " are you?",
+    });
+    assert.equal(state.assistantPartialTranscript, "How are you?");
+  });
+
+  it("accepts cumulative transcript partials without duplicating text", () => {
+    let state = applyRealtimeEventToVoiceState(
+      { status: "listening", messages: [], playbackQueue: [] },
+      {
+        ...baseEvent,
+        type: "transcript.user.partial",
+        text: "Hello",
+      },
+    );
+    state = applyRealtimeEventToVoiceState(state, {
+      ...baseEvent,
+      id: "event-2",
+      type: "transcript.user.partial",
+      text: "Hello world",
+    });
+
+    assert.equal(state.userPartialTranscript, "Hello world");
+  });
+
   it("keeps audio chunks out of persisted history and handles recorder fallback", () => {
     assert.equal(shouldPersistAudioChunk(), false);
     assert.doesNotThrow(() => validateAudioChunk(new Uint8Array([1, 2, 3])));
