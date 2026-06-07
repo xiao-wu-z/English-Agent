@@ -7,18 +7,37 @@ import {
 import { resolveRealtimeProvider } from "../model-providers/server/realtime-index.ts";
 import type { ProviderEnv } from "../model-providers/server/registry.ts";
 import { assertScenarioById } from "../scenarios/index.ts";
+import type { Scenario } from "../scenarios/schema.ts";
 import {
   decideAudioForwarding,
   type AudioChunkMetadata,
 } from "../voice-audio-format/index.ts";
+import {
+  createVoiceSkillSession,
+  endVoiceSkillSession,
+  handleVoiceTranscript,
+} from "../voice-skill-flow/orchestrator.server.ts";
+import type { RealtimeApplicationEvent } from "./application-events.ts";
 
-type RealtimePracticeSession = {
+export type RealtimePracticeEvent =
+  | RealtimeProviderEvent
+  | RealtimeApplicationEvent;
+
+type VoiceSkillCompletion = Awaited<ReturnType<typeof endVoiceSkillSession>>;
+
+export type RealtimePracticeSession = {
   id: string;
   scenarioId: string;
+  scenario: Scenario;
   provider: RealtimeModelProvider;
   providerSession: RealtimeSession;
-  events: RealtimeProviderEvent[];
-  subscribers: Set<(event: RealtimeProviderEvent) => void>;
+  skillSessionId: string;
+  events: RealtimePracticeEvent[];
+  subscribers: Set<(event: RealtimePracticeEvent) => void>;
+  processedFinalEventIds: Set<string>;
+  transcriptProcessing: Promise<void>;
+  providerClosed: boolean;
+  endProcessing?: Promise<VoiceSkillCompletion>;
 };
 
 const sessions = new Map<string, RealtimePracticeSession>();
@@ -57,21 +76,66 @@ export async function createRealtimePracticeSession(input: {
   const scenario = assertScenarioById(input.scenarioId);
   const provider = input.provider ?? resolveRealtimeProvider(getRealtimeProviderEnv());
   const sessionId = `voice-session-${randomUUID()}`;
-  const events: RealtimeProviderEvent[] = [];
-  const subscribers = new Set<(event: RealtimeProviderEvent) => void>();
+  const skillSession = await createVoiceSkillSession({ scenarioId: scenario.id });
+  const events: RealtimePracticeEvent[] = [];
+  const subscribers = new Set<(event: RealtimePracticeEvent) => void>();
   const providerSession = await provider.createSession({
     scenarioId: scenario.id,
     sessionId,
+    instructions: buildRealtimeScenarioInstructions(scenario),
   });
-  const session = {
+  const session: RealtimePracticeSession = {
     id: sessionId,
     scenarioId: scenario.id,
+    scenario,
     provider,
     providerSession,
+    skillSessionId: skillSession.session.id,
     events,
     subscribers,
+    processedFinalEventIds: new Set(),
+    transcriptProcessing: Promise.resolve(),
+    providerClosed: false,
   };
-  provider.onEvent(providerSession.id, (event) => appendRealtimePracticeEvent(session, event));
+  provider.onEvent(providerSession.id, (event) => {
+    appendRealtimePracticeEvent(session, event);
+    if (
+      event.type === "transcript.user.final" &&
+      event.text?.trim() &&
+      !session.processedFinalEventIds.has(event.id)
+    ) {
+      session.processedFinalEventIds.add(event.id);
+      session.transcriptProcessing = session.transcriptProcessing
+        .then(async () => {
+          const result = await handleVoiceTranscript({
+            sessionId: session.skillSessionId,
+            transcript: event.text ?? "",
+            final: true,
+          });
+          if (result.persisted && result.realtimeCorrection) {
+            appendRealtimePracticeEvent(session, {
+              id: `voice-app-event-${randomUUID()}`,
+              sessionId: session.id,
+              createdAt: new Date().toISOString(),
+              type: "correction.ready",
+              correction: result.realtimeCorrection,
+            });
+          }
+        })
+        .catch(() => {
+          appendRealtimePracticeEvent(session, {
+            id: `voice-app-event-${randomUUID()}`,
+            sessionId: session.id,
+            createdAt: new Date().toISOString(),
+            type: "workflow.error",
+            error: {
+              code: "correction_failed",
+              message: "本轮轻纠错暂时不可用，语音练习可以继续。",
+            },
+          });
+        });
+    }
+  });
   sessions.set(sessionId, session);
   return session;
 }
@@ -79,7 +143,7 @@ export async function createRealtimePracticeSession(input: {
 export async function sendRealtimePracticeText(input: {
   sessionId: string;
   text: string;
-}): Promise<RealtimeProviderEvent[]> {
+}): Promise<RealtimePracticeEvent[]> {
   const session = assertRealtimePracticeSession(input.sessionId);
   await session.provider.sendText(session.providerSession.id, input.text);
   return session.events;
@@ -126,21 +190,37 @@ export async function sendRealtimePracticeAudio(input: {
   return { accepted: true };
 }
 
-export function getRealtimePracticeEvents(sessionId: string): RealtimeProviderEvent[] {
+export function getRealtimePracticeEvents(sessionId: string): RealtimePracticeEvent[] {
   return assertRealtimePracticeSession(sessionId).events;
 }
 
-export async function endRealtimePracticeSession(sessionId: string): Promise<{
-  accepted: true;
-}> {
+export async function endRealtimePracticeSession(sessionId: string) {
   const session = assertRealtimePracticeSession(sessionId);
-  await session.provider.endSession(session.providerSession.id);
-  return { accepted: true };
+  if (!session.endProcessing) {
+    session.endProcessing = (async () => {
+      await session.transcriptProcessing;
+      if (!session.providerClosed) {
+        await session.provider.endSession(session.providerSession.id);
+        session.providerClosed = true;
+      }
+      return endVoiceSkillSession({
+        sessionId: session.skillSessionId,
+      });
+    })().catch((error) => {
+      session.endProcessing = undefined;
+      throw error;
+    });
+  }
+  const result = await session.endProcessing;
+  return {
+    ...result,
+    scenario: session.scenario,
+  };
 }
 
 export function subscribeRealtimePracticeEvents(
   sessionId: string,
-  handler: (event: RealtimeProviderEvent) => void,
+  handler: (event: RealtimePracticeEvent) => void,
 ): () => void {
   const session = assertRealtimePracticeSession(sessionId);
   session.subscribers.add(handler);
@@ -163,10 +243,24 @@ function sessionProviderName(sessionId: string): string {
 
 function appendRealtimePracticeEvent(
   session: RealtimePracticeSession,
-  event: RealtimeProviderEvent,
+  event: RealtimePracticeEvent,
 ): void {
   session.events.push(event);
   for (const subscriber of session.subscribers) {
     subscriber(event);
   }
+}
+
+function buildRealtimeScenarioInstructions(scenario: Scenario): string {
+  const goals = scenario.goals.map((goal) => goal.label).join("; ");
+  const constraints = scenario.constraints.join(" ");
+  return [
+    `You are the ${scenario.context.aiRole}.`,
+    `Setting: ${scenario.context.setting}`,
+    `The learner is the ${scenario.context.userRole}.`,
+    `Purpose: ${scenario.context.learnerPurpose}`,
+    `Practice goals: ${goals}.`,
+    constraints,
+    "Keep replies concise, natural, and in role. Ask one question at a time.",
+  ].join(" ");
 }

@@ -130,6 +130,7 @@ describe("qwen realtime websocket provider", () => {
     const session = await provider.createSession({
       scenarioId: "daily-small-talk",
       sessionId: "voice-session-1",
+      instructions: "You are a new acquaintance in a friendly community chat.",
     });
     provider.onEvent(session.id, (event) => events.push(event.type));
     await provider.sendAudioChunk(session.id, new Uint8Array([1, 2, 3]));
@@ -144,6 +145,7 @@ describe("qwen realtime websocket provider", () => {
 
     assert.equal(socket?.options.headers?.Authorization, "Bearer sk-test-secret");
     assert.ok(socket?.sent.some((payload) => payload.includes("\"type\":\"session.update\"")));
+    assert.ok(socket?.sent.some((payload) => payload.includes("new acquaintance")));
     assert.deepEqual(JSON.parse(socket?.sent.at(-1) ?? "{}"), {
       type: "input_audio_buffer.append",
       audio: "AQID",

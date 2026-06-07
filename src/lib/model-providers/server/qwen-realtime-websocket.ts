@@ -233,7 +233,9 @@ export class QwenRealtimeWebSocketProvider implements RealtimeModelProvider {
             voice: "Tina",
             input_audio_format: "pcm",
             output_audio_format: "pcm",
-            instructions: "You are an English speaking practice coach. Keep replies concise and natural.",
+            instructions:
+              input.instructions ??
+              "You are an English speaking practice coach. Keep replies concise and natural.",
             turn_detection: {
               type: "server_vad",
               threshold: 0.5,

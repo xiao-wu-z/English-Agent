@@ -64,6 +64,7 @@ export type RealtimeProviderErrorCode = z.infer<
 export type RealtimeSessionInput = {
   scenarioId: string;
   sessionId?: string;
+  instructions?: string;
 };
 
 export type RealtimeModelProvider = {
