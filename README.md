@@ -17,6 +17,22 @@ English Agent is an MVP for practicing spoken English in realistic situations. I
 
 The project is designed around one principle: **keep the conversation moving, then turn the conversation into actionable feedback**. Corrections are shown only when they are useful and sufficiently confident; lower-priority issues can be deferred to the final report instead of interrupting every turn.
 
+## Demo
+
+<p align="center">
+  <a href="https://cdn.jsdelivr.net/gh/xiao-wu-z/English-Agent@demo-v1/docs/assets/demo.mp4">
+    <img src="docs/assets/demo-preview.png" alt="English Agent demo video" width="820">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://cdn.jsdelivr.net/gh/xiao-wu-z/English-Agent@demo-v1/docs/assets/demo.mp4"><strong>Watch the demo online</strong></a>
+  ·
+  <a href="Screen-2026-06-07-204139.mp4">Open the original HD video</a>
+</p>
+
+Click the preview to play the compact MP4 in your browser. The original HD recording is retained separately.
+
 ## What It Provides
 
 | Capability | Description |

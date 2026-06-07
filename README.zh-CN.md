@@ -16,6 +16,22 @@ English Agent 是一个用于真实情景英语练习的 MVP。它将可复用�
 
 项目遵循一个核心原则：**优先保持对话流畅，再把对话转化为可执行的学习反馈**。系统只展示有价值且置信度足够高的即时纠错，次要问题可以延迟到课后报告，避免每轮都打断用户。
 
+## 演示视频
+
+<p align="center">
+  <a href="https://cdn.jsdelivr.net/gh/xiao-wu-z/English-Agent@demo-v1/docs/assets/demo.mp4">
+    <img src="docs/assets/demo-preview.png" alt="English Agent 演示视频" width="820">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://cdn.jsdelivr.net/gh/xiao-wu-z/English-Agent@demo-v1/docs/assets/demo.mp4"><strong>在线观看演示视频</strong></a>
+  ·
+  <a href="Screen-2026-06-07-204139.mp4">打开原始高清视频</a>
+</p>
+
+点击封面即可在浏览器中播放轻量 MP4，原始高清录屏会单独保留。
+
 ## 核心能力
 
 | 能力 | 说明 |
