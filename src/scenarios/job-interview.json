@@ -1,0 +1,54 @@
+{
+  "id": "job-interview",
+  "version": "1.0.0",
+  "title": "Job Interview",
+  "titleZh": "求职面试",
+  "description": "Practice answering common interview questions clearly and professionally.",
+  "descriptionZh": "练习清晰、自然地回答常见英文面试问题。",
+  "difficulty": "intermediate",
+  "maxSessionMinutes": 10,
+  "context": {
+    "setting": "A first-round job interview for a product or software role.",
+    "aiRole": "Interviewer",
+    "userRole": "Candidate",
+    "learnerPurpose": "Answer questions with clear structure, relevant examples, and confident tone."
+  },
+  "goals": [
+    {
+      "id": "self-introduction",
+      "label": "Give a concise self-introduction",
+      "successCriteria": [
+        "Mentions background, strengths, and target role",
+        "Keeps the answer under one minute"
+      ]
+    },
+    {
+      "id": "behavioral-answer",
+      "label": "Answer one behavioral question",
+      "successCriteria": [
+        "Uses a clear situation, action, and result",
+        "Connects the example to the role"
+      ]
+    }
+  ],
+  "constraints": [
+    "Keep the conversation realistic and professional.",
+    "Ask one interview question at a time.",
+    "Avoid overly advanced business jargon unless the learner uses it first."
+  ],
+  "promptHints": {
+    "tone": "professional",
+    "vocabulary": ["experience", "strength", "challenge", "responsibility", "achievement"],
+    "sampleUserIntents": [
+      "Introduce myself",
+      "Explain my previous experience",
+      "Answer behavioral questions"
+    ]
+  },
+  "skillBindings": {
+    "practice": "english-practice",
+    "assessment": "english-assessment",
+    "correction": "english-correction",
+    "summary": "english-summary"
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "id": "daily-small-talk",
+  "version": "1.0.0",
+  "title": "Daily Small Talk",
+  "titleZh": "日常闲聊",
+  "description": "Practice simple everyday conversation and natural follow-up questions.",
+  "descriptionZh": "练习简单日常对话和自然追问。",
+  "difficulty": "beginner",
+  "maxSessionMinutes": 8,
+  "context": {
+    "setting": "A friendly chat with a new acquaintance before a community activity.",
+    "aiRole": "New acquaintance",
+    "userRole": "Participant",
+    "learnerPurpose": "Start small talk, answer simple questions, and keep the conversation going."
+  },
+  "goals": [
+    {
+      "id": "start-conversation",
+      "label": "Start a friendly conversation",
+      "successCriteria": [
+        "Uses a natural greeting",
+        "Adds one simple topic"
+      ]
+    },
+    {
+      "id": "ask-follow-up",
+      "label": "Ask a follow-up question",
+      "successCriteria": [
+        "Responds to the other person's answer",
+        "Asks one clear follow-up question"
+      ]
+    }
+  ],
+  "constraints": [
+    "Keep the conversation warm and simple.",
+    "Avoid sensitive personal topics.",
+    "Ask one question at a time."
+  ],
+  "promptHints": {
+    "tone": "friendly",
+    "vocabulary": ["weekend", "hobby", "weather", "nice to meet you", "plans"],
+    "sampleUserIntents": [
+      "Say hello",
+      "Talk about the weekend",
+      "Ask about hobbies"
+    ]
+  },
+  "skillBindings": {
+    "practice": "english-practice",
+    "assessment": "english-assessment",
+    "correction": "english-correction",
+    "summary": "english-summary"
+  }
+}

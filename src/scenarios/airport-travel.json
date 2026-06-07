@@ -1,0 +1,54 @@
+{
+  "id": "airport-travel",
+  "version": "1.0.0",
+  "title": "Airport Travel",
+  "titleZh": "机场旅行",
+  "description": "Practice asking for help at the airport and handling common travel situations.",
+  "descriptionZh": "练习在机场询问信息和处理常见旅行场景。",
+  "difficulty": "intermediate",
+  "maxSessionMinutes": 10,
+  "context": {
+    "setting": "An airport service desk where the learner needs help with travel questions.",
+    "aiRole": "Airport ground staff",
+    "userRole": "Traveler",
+    "learnerPurpose": "Ask clear questions about flights, boarding, luggage, and delays."
+  },
+  "goals": [
+    {
+      "id": "ask-flight-status",
+      "label": "Ask about flight status",
+      "successCriteria": [
+        "States the flight question clearly",
+        "Understands a simple staff response"
+      ]
+    },
+    {
+      "id": "handle-luggage-question",
+      "label": "Handle a luggage question",
+      "successCriteria": [
+        "Uses airport vocabulary",
+        "Asks for the next step politely"
+      ]
+    }
+  ],
+  "constraints": [
+    "Keep the interaction practical and helpful.",
+    "Use common travel vocabulary.",
+    "Do not create complex emergency situations."
+  ],
+  "promptHints": {
+    "tone": "helpful",
+    "vocabulary": ["boarding pass", "gate", "delay", "luggage", "connection"],
+    "sampleUserIntents": [
+      "Ask about a delayed flight",
+      "Ask where the gate is",
+      "Ask about checked luggage"
+    ]
+  },
+  "skillBindings": {
+    "practice": "english-practice",
+    "assessment": "english-assessment",
+    "correction": "english-correction",
+    "summary": "english-summary"
+  }
+}
