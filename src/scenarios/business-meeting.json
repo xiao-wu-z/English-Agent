@@ -1,0 +1,54 @@
+{
+  "id": "business-meeting",
+  "version": "1.0.0",
+  "title": "Business Meeting",
+  "titleZh": "商务会议",
+  "description": "Practice sharing updates, asking questions, and responding in a work meeting.",
+  "descriptionZh": "练习在英文会议中汇报进展、提问和回应。",
+  "difficulty": "advanced",
+  "maxSessionMinutes": 12,
+  "context": {
+    "setting": "A weekly project meeting with a small cross-functional team.",
+    "aiRole": "Meeting facilitator",
+    "userRole": "Team member",
+    "learnerPurpose": "Share concise updates, clarify blockers, and respond professionally."
+  },
+  "goals": [
+    {
+      "id": "share-update",
+      "label": "Share a project update",
+      "successCriteria": [
+        "States progress clearly",
+        "Mentions next steps or blockers"
+      ]
+    },
+    {
+      "id": "ask-clarifying-question",
+      "label": "Ask a clarifying question",
+      "successCriteria": [
+        "Asks a relevant work question",
+        "Uses a professional tone"
+      ]
+    }
+  ],
+  "constraints": [
+    "Keep the meeting realistic and concise.",
+    "Ask one follow-up question at a time.",
+    "Focus on project communication instead of generic small talk."
+  ],
+  "promptHints": {
+    "tone": "professional",
+    "vocabulary": ["update", "deadline", "blocker", "priority", "next step"],
+    "sampleUserIntents": [
+      "Share progress",
+      "Explain a blocker",
+      "Ask about priorities"
+    ]
+  },
+  "skillBindings": {
+    "practice": "english-practice",
+    "assessment": "english-assessment",
+    "correction": "english-correction",
+    "summary": "english-summary"
+  }
+}

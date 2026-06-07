@@ -1,0 +1,54 @@
+{
+  "id": "restaurant-ordering",
+  "version": "1.0.0",
+  "title": "Restaurant Ordering",
+  "titleZh": "餐厅点餐",
+  "description": "Practice ordering food, asking simple questions, and responding politely.",
+  "descriptionZh": "练习点餐、询问菜品和礼貌回应。",
+  "difficulty": "beginner",
+  "maxSessionMinutes": 8,
+  "context": {
+    "setting": "A casual restaurant where the learner orders lunch.",
+    "aiRole": "Waiter",
+    "userRole": "Customer",
+    "learnerPurpose": "Order food politely and ask simple questions about the menu."
+  },
+  "goals": [
+    {
+      "id": "order-main-dish",
+      "label": "Order a main dish politely",
+      "successCriteria": [
+        "Uses a polite ordering phrase",
+        "Names the selected dish clearly"
+      ]
+    },
+    {
+      "id": "ask-menu-question",
+      "label": "Ask a menu question",
+      "successCriteria": [
+        "Asks about ingredients, price, or recommendations",
+        "Responds to the waiter's follow-up"
+      ]
+    }
+  ],
+  "constraints": [
+    "Keep the exchange simple and practical.",
+    "Ask one menu-related question at a time.",
+    "Use common restaurant vocabulary."
+  ],
+  "promptHints": {
+    "tone": "friendly",
+    "vocabulary": ["menu", "order", "recommend", "ingredient", "bill"],
+    "sampleUserIntents": [
+      "Order a main dish",
+      "Ask for a recommendation",
+      "Ask for the bill"
+    ]
+  },
+  "skillBindings": {
+    "practice": "english-practice",
+    "assessment": "english-assessment",
+    "correction": "english-correction",
+    "summary": "english-summary"
+  }
+}
