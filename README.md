@@ -27,6 +27,8 @@ The project is designed around one principle: **keep the conversation moving, th
 | Stable transcript rendering | Merges partial and final transcript events instead of displaying every provider delta as a separate message. |
 | Lightweight corrections | Evaluates finalized learner turns and surfaces concise, high-confidence corrections without taking over the conversation. |
 | Structured practice report | Produces an overall score, dimension scores, strengths, priority issues, corrected sentences, recommended expressions, and next-practice suggestions. |
+| Three-tier prompt architecture | Separates stable coach rules, scenario/skill instructions, and bounded runtime context so prompts stay composable and provider-neutral. |
+| Bounded conversation memory | Combines a rolling summary with recent turns and selected Badcase hints instead of continuously replaying the full transcript. |
 | Scenario-aware agent skills | Uses separate practice, correction, assessment, and summary skill contracts while keeping provider details outside the UI. |
 | Recovery and diagnostics | Includes heartbeat, timeout, lifecycle, playback-queue, and safe user-facing error handling for realtime sessions. |
 | Provider abstraction | Runs locally with a deterministic mock provider or connects to Qwen Realtime through a server-side WebSocket adapter. |
@@ -130,6 +132,80 @@ The report contract includes:
 
 Report generation waits for pending finalized transcripts before summarization, reducing the chance that the learner's last turn is omitted.
 
+## Three-Tier Prompt Architecture
+
+English Agent builds model requests from three explicit context tiers instead of maintaining one large, mutable prompt:
+
+| Tier | Contents | Purpose |
+| --- | --- | --- |
+| **Tier 1: Core Coach Rules** | Stable safety and teaching rules | Keeps the coach concise, evidence-based, learner-focused, and free of hidden reasoning or provider credentials. |
+| **Tier 2: Scenario and Active Skill** | Scenario roles, goals, constraints, the currently selected Skill, and its expected output schema | Changes the teaching task without duplicating the global rules or coupling prompts to a model provider. |
+| **Tier 3: Runtime Context** | Conversation memory snapshot, relevant Badcase hints, and the current task input | Supplies only the session-specific evidence needed for the current model call. |
+
+```text
+Tier 1: stable coaching policy
+          +
+Tier 2: scenario + one active Skill + output contract
+          +
+Tier 3: bounded memory + Badcase hints + current input
+          |
+          v
+Provider-neutral messages
+          |
+          v
+Mock or Qwen model provider
+          |
+          v
+Zod-validated structured output
+```
+
+The prompt builder rejects provider-specific transport or credential details in prompt-facing inputs. It also records metadata such as scenario version, active Skill, included tiers, context size, and expected output schema, which makes prompt composition easier to inspect and test.
+
+## Memory Design
+
+The memory model is intentionally bounded. It preserves enough context for coherent coaching without allowing a long session to grow the prompt indefinitely.
+
+### In-session memory
+
+- **Rolling summary:** a compact representation of earlier conversation context.
+- **Recent turns:** the latest learner and coach exchanges; prompt composition defaults to the most recent six turns.
+- **Current user input:** the active learner message or finalized transcript being processed.
+- **Compression signal:** sessions can be marked for compression after more than eight turns or approximately 12,000 transcript characters.
+
+### Learning feedback memory
+
+The prompt layer can include up to three relevant Badcase hints. These are short, prompt-safe lessons derived from known correction, assessment, or summary failures. They guide the active Skill without injecting raw logs, secrets, audio, or hidden reasoning into the model request.
+
+### Local practice history
+
+The repository includes a versioned `localStorage` repository for saving validated practice sessions and listing score or summary previews. It rejects credential, raw-audio, and hidden-reasoning fields before persistence and prunes retained data with bounded policies.
+
+This storage module is an implemented foundation, but complete history browsing and cross-session personalization are not yet connected to the main MVP interface. Database-backed synchronization and cross-device learner memory remain roadmap work.
+
+## Agent Skills
+
+Learning behavior is split into four task-specific Skills under [`agent-skills`](agent-skills). Only the active Skill is loaded for a model request.
+
+| Skill | Responsibility | Structured output |
+| --- | --- | --- |
+| `english-practice` | Stay in role, keep the learner speaking, and choose the next concise conversational move | `PracticeTurnGuidance` |
+| `english-correction` | Decide whether an issue should be shown, suppressed, or deferred, following the "few but precise" correction policy | `CorrectionItem` |
+| `english-assessment` | Produce evidence-based, non-official learning scores, confidence, risk, and recommended actions | `AssessmentResult` |
+| `english-summary` | Turn the completed session into strengths, priority issues, corrections, expressions, and next steps | `PracticeSummary` |
+
+Each Skill is defined in a readable `SKILL.md`, registered against one task and one expected schema, then executed through the same provider-neutral runtime:
+
+```text
+Scenario skill binding
+  -> load one SKILL.md
+  -> combine it with the three prompt tiers
+  -> call the selected model provider
+  -> parse the declared Zod output contract
+  -> feed the result into practice, correction, assessment, or reporting
+```
+
+This separation keeps realtime conversation guidance short, prevents correction logic from dominating the role-play, and allows assessment or summary behavior to evolve without rewriting the voice transport layer.
+
 ## Architecture
 
 ```text
@@ -145,6 +221,8 @@ src/
 │   ├── agent-skill-contracts/          # Structured model output schemas
 │   ├── model-providers/                # Mock and Qwen provider adapters
 │   ├── pcm-audio-capture/              # Browser PCM16 microphone capture
+│   ├── practice-history/               # Versioned local history repository
+│   ├── prompt-context/                 # Three-tier prompt composition
 │   ├── qwen-pcm-playback/              # Ordered output-audio scheduling
 │   ├── realtime-voice-flow/            # Server-side voice orchestration
 │   ├── realtime-voice-recovery/        # Timeout and recovery policy
